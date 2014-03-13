@@ -1,4 +1,4 @@
-amqp-to-stomp
+stompie
 =============
 
-Wrapper class for amqp to act as a Stomp class
+Native implementation of a PHP Stomp client.
