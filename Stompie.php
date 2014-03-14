@@ -27,7 +27,7 @@ class StompieFrame
      *
      * @param string $command Stomp command
      */
-    public function __construct($command, $headers = array(), $body = ''))
+    public function __construct($command, $headers = array(), $body = '')
     {
         $this->command = $command;
         $this->headers = $headers;
@@ -152,13 +152,13 @@ class StompieFrame
 class Stompie
 {
     /**
-     * @var string Broker URI
-     */
-    protected $broker;
-    /**
      * @var string Host (Stomp specification vhost)
      */
     protected $host;
+    /**
+     * @var int Port
+     */
+    protected $port;
     /**
      * @var string Username of connection
      */
@@ -184,9 +184,20 @@ class Stompie
      */
     private $session;
     /**
-     * @var array Received messages
+     * @var array Arrays of received frames
      */
-    private $messages = array();
+    private $frames = array(
+        'messages' => array(),
+        'receipts' => array(),
+        'others'   => array(),
+    );
+    /**
+     * @var array[int] Read timeout
+     */
+    private $timeout = array(
+        'sec' => 1,
+        'usec' => 0,
+    );
 
     /**
      * Opens a new Stomp connection.
@@ -197,8 +208,8 @@ class Stompie
      */
     public function __construct($broker, $username, $password)
     {
-        $this->broker = $broker;
         $this->host = parse_url($broker, PHP_URL_HOST);
+        $this->port = parse_url($broker, PHP_URL_PORT);
         $this->username = $username;
         $this->password = $password;
         $this->connect();
@@ -212,29 +223,56 @@ class Stompie
      */
     protected function sendFrame(StompieFrame $frame)
     {
-        // Reconnect to flush the socket
-        if ($this->is_connected)
-        {
-            $this->reconnect();
-        }
-        return $this->rawSend($frame);
+        socket_write($this->socket, $frame->render());
+        $this->read();
     }
 
-    protected function rawSend(StompieFrame $frame, $timeout = 1)
+    /**
+     * Store received frame in local queue
+     *
+     * @param StompieFrame $frame Frame
+     */
+    protected function storeFrame(StompieFrame $frame)
     {
-        // Send the frame to the socket
-        fwrite($this->socket, $frame->render());
-        stream_set_timeout($this->socket, $timeout);
+        switch ($frame->command)
+        {
+            case 'MESSAGE':
+                $this->frames['messages'][] = $frame;
+                break;
+            case 'RECEIPT':
+                $this->frames['receipts'][] = $frame;
+                break;
+            default:
+                $this->frames['others'][] = $frame;
+                break;
+        }
+    }
+
+    /**
+     * Read messages from socket
+     */
+    protected function read()
+    {
         $response = '';
-        // Read lines from socket
         for (;;)
         {
-            $row = fgets($this->socket);
-            // \x00 is the message terminator. If found, we are done!
-            if (preg_match('/\x00/', $row))
+            socket_set_option($this->socket, SOL_SOCKET, SO_RCVTIMEO, $this->timeout);
+            $row = socket_read($this->socket, 2048);
+
+            // \x00 is the message terminator, store the message
+            if (preg_match('/\x00/', $response))
             {
-                $response .= str_replace("\00", '', $row);
-                break;
+                $responses = explode("\00", $response);
+                foreach ($responses as $message)
+                {
+                    // Ignore one char messages
+                    if (strlen($message) < 2)
+                    {
+                        continue;
+                    }
+                    $this->storeFrame(StompieFrame::fromMessage($message));
+                }
+                $response = '';
             }
             $response .= $row;
             // Halt when the socket returns an empty response
@@ -243,7 +281,6 @@ class Stompie
                 break;
             }
         }
-        return StompieFrame::fromMessage($response);
     }
 
     /**
@@ -253,7 +290,7 @@ class Stompie
      */
     protected function disconnect()
     {
-        fclose($this->socket);
+        socket_close($this->socket);
         $this->is_connected = false;
     }
 
@@ -275,7 +312,9 @@ class Stompie
      */
     protected function connect()
     {
-        $this->socket = stream_socket_client($this->broker, $error_code, $error_string, 5);
+        $this->socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+        socket_connect($this->socket, $this->host, $this->port);
+
         if ( ! $this->socket)
         {
             // Unable to connect to socket
@@ -291,11 +330,16 @@ class Stompie
             $frame->addHeader('login', $this->username);
             $frame->addHeader('passcode', $this->password);
         }
-        $response = $this->sendFrame($frame);
-        // Server returns CONNECTED if the login was successful
-        if ($response->command === 'CONNECTED')
+        $this->sendFrame($frame);
+        // Check for response
+        foreach ($this->frames['others'] as $key => $frame)
         {
-            return $this->is_connected = true;
+            if ($frame->command === 'CONNECTED')
+            {
+                $this->session_id = $frame->getHeader('session');
+                unset($this->frames['others'][$key]);
+                return $this->is_connected = true;
+            }
         }
         return false;
     }
@@ -309,6 +353,32 @@ class Stompie
     }
 
     /**
+     * NACK's a frame
+     *
+     * @param StompieFrame $frame Frame
+     * @return bool Successful?
+     */
+    public function nack(StompieFrame $frame)
+    {
+        $ack_frame = new StompieFrame('NACK');
+        $ack_frame->addHeader('message-id', $frame->getHeader('message-id'));
+        $ack_frame->addHeader('subscription', 0);
+        $receipt_id = self::makeReceiptId('nack');
+        $ack_frame->addHeader('receipt', $receipt_id);
+        $this->sendFrame($ack_frame);
+        // Check for response
+        foreach ($this->frames['receipts'] as $key => $receipt)
+        {
+            if ($receipt->getHeader('receipt-id') == $receipt_id)
+            {
+                unset($this->frames['receipts'][$key]);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * ACK's a frame
      *
      * @param StompieFrame $frame Frame
@@ -319,11 +389,89 @@ class Stompie
         $ack_frame = new StompieFrame('ACK');
         $ack_frame->addHeader('message-id', $frame->getHeader('message-id'));
         $ack_frame->addHeader('subscription', 0);
-        $ack_frame->addHeader('receipt', 'ack-frame');
-        // Send frame without reconnecting to preserve the active subscription
-        $response = $this->rawSend($ack_frame);
-        return $response->command === 'RECEIPT'
-            && $response->getHeader('receipt-id') === 'ack-frame';
+        $receipt_id = self::makeReceiptId('ack');
+        $ack_frame->addHeader('receipt', $receipt_id);
+        $this->sendFrame($ack_frame);
+        // Check for response
+        foreach ($this->frames['receipts'] as $key => $receipt)
+        {
+            if ($receipt->getHeader('receipt-id') == $receipt_id)
+            {
+                unset($this->frames['receipts'][$key]);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Returns the current session id
+     *
+     * @return string Session id
+     */
+    public function getSessionId()
+    {
+        return $this->session_id;
+    }
+
+    /**
+     * Sets the read timeout in seconds and microseconds
+     *
+     * @param int $seconds Seconds
+     * @param int $microseconds Microseconds
+     */
+    public function setReadTimeout($seconds, $microseconds = 0)
+    {
+        $this->timeout = array(
+            'sec' => $seconds,
+            'usec' => $microseconds,
+        );
+    }
+
+    /**
+     * Get the current read timeout array
+     *
+     * @return array Timeout array
+     */
+    public function getReadTimeout()
+    {
+        return $this->timeout;
+    }
+
+    /**
+     * Begins a transaction with the server
+     *
+     * @param string $transaction_id Transaction id
+     */
+    public function begin($transaction_id)
+    {
+        $frame = new StompieFrame('BEGIN');
+        $frame->addHeader('transaction', $transaction_id);
+        $this->sendFrame($frame);
+    }
+
+    /**
+     * Commits a transaction with the server
+     *
+     * @param string $transaction_id Transaction id
+     */
+    public function commit($transaction_id)
+    {
+        $frame = new StompieFrame('COMMIT');
+        $frame->addHeader('transaction', $transaction_id);
+        $this->sendFrame($frame);
+    }
+
+    /**
+     * Aborts a transaction with the server
+     *
+     * @param string $transaction_id Transaction id
+     */
+    public function abort($transaction_id)
+    {
+        $frame = new StompieFrame('ABORT');
+        $frame->addHeader('transaction', $transaction_id);
+        $this->sendFrame($frame);
     }
 
     /**
@@ -334,8 +482,29 @@ class Stompie
     public function subscribe($destination)
     {
         $this->destination = $destination;
+        $frame = new StompieFrame('SUBSCRIBE');
+        $frame->addHeader('id', 0);
+        $frame->addHeader('destination', $this->destination);
+        $frame->addHeader('ack', 'client-individual');
+        $this->sendFrame($frame);
     }
 
+    /**
+     * Unsubscribe from destination
+     */
+    public function unsubscribe()
+    {
+        $frame = new StompieFrame('UNSUBSCRIBE');
+        $frame->addHeader('id', 0);
+        $frame->addHeader('destination', $destination);
+        $this->sendFrame($frame);
+        $this->destination = null;
+        $this->frames = array(
+            'messages' => array(),
+            'receipts' => array(),
+            'others' => array(),
+        );
+    }
     /**
      * Send a message to a destination
      *
@@ -354,30 +523,40 @@ class Stompie
         $frame->addHeader('destination', $destination);
         $frame->addHeader('content-length', strlen($message));
         $frame->addHeader('content-type', 'text/plain');
-        $frame->addHeader('receipt', 'send-frame');
+        $receipt_id = self::makeReceiptId('send');
+        $frame->addHeader('receipt', $receipt_id);
         $frame->body = $message;
-        $response = $this->sendFrame($frame);
-        return $response->command == 'RECEIPT'
-            && $response->getHeader('receip-id') === 'send-frame';
+        $this->sendFrame($frame);
+        // Check for response
+        foreach ($this->frames['receipts'] as $key => $receipt)
+        {
+            if ($receipt->getHeader('receipt-id') === $receipt_id)
+            {
+                unset($this->frames['receipts'][$key]);
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
-     * Checks if there are frames available in the queue by
-     * resubscribing which seems to be the only way.
+     * Creates a unique receipt id
+     *
+     * @return string Unique receipt id
+     */
+    private static function makeReceiptId($prefix = '')
+    {
+        return $prefix . uniqid();
+    }
+
+    /**
+     * Checks if there are frames available in the queue.
      *
      * @return bool Returns true if there are frames to be read
      */
     public function hasFrame()
     {
-        $frame = new StompieFrame('SUBSCRIBE');
-        $frame->addHeader('id', 0);
-        $frame->addHeader('destination', $this->destination);
-        $frame->addHeader('ack', 'client-individual');
-        $response = $this->sendFrame($frame);
-        // If we got any messages when we subscribed to the queue, we've
-        // got frames to read
-        return $response !== false
-            && $response->command === 'MESSAGE';
+        return count($this->frames['messages']) > 0;
     }
 
     /**
@@ -387,13 +566,10 @@ class Stompie
      */
     public function readFrame()
     {
-        $frame = new StompieFrame('SUBSCRIBE');
-        $frame->addHeader('id', 0);
-        $frame->addHeader('destination', $this->destination);
-        $frame->addHeader('ack', 'client-individual');
-        return $this->sendFrame($frame);
+        if ( ! $this->hasFrame())
+        {
+            return false;
+        }
+        return array_pop($this->frames['messages']);
     }
 }
-
-$s = new Stompie('tcp://localhost:61613', 'admin', 'admin');
-$s->send('pjot.test', 'eeeeipen schnaur', array('priority' => 4, 'persistant' => true));
