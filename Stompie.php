@@ -12,34 +12,26 @@ class StompieFrame
     /**
      * @var string Stomp command
      */
-    protected $command;
+    public $command;
     /**
      * @var array Associative array of headers
      */
-    protected $headers = array();
+    public $headers = array();
     /**
      * @var string Body of message
      */
-    protected $body;
+    public $body;
 
     /**
      * Create a new Stomp frame
      *
      * @param string $command Stomp command
      */
-    public function __construct($command)
+    public function __construct($command, $headers = array(), $body = ''))
     {
         $this->command = $command;
-    }
-
-    /**
-     * Get the frame command
-     *
-     * @return string Frame command
-     */
-    public function getCommand()
-    {
-        return $this->command;
+        $this->headers = $headers;
+        $this->body = $body;
     }
 
     /**
@@ -79,15 +71,6 @@ class StompieFrame
         {
             unset($this->headers[$key]);
         }
-    }
-    /**
-     * Set the body of the frame
-     *
-     * @param string $body frame body
-     */
-    public function setBody($body)
-    {
-        $this->body = $body;
     }
 
     /**
@@ -149,7 +132,7 @@ class StompieFrame
             $frame->addHeader($matches[1], str_replace('\c', ':', $matches[2]));
         }
         // Read body
-        $frame->setBody(implode("\n", $rows));
+        $frame->body = implode("\n", $rows);
         return $frame;
     }
 }
@@ -310,7 +293,7 @@ class Stompie
         }
         $response = $this->sendFrame($frame);
         // Server returns CONNECTED if the login was successful
-        if ($response->getCommand() === 'CONNECTED')
+        if ($response->command === 'CONNECTED')
         {
             return $this->is_connected = true;
         }
@@ -339,7 +322,7 @@ class Stompie
         $ack_frame->addHeader('receipt', 'ack-frame');
         // Send frame without reconnecting to preserve the active subscription
         $response = $this->rawSend($ack_frame);
-        return $response->getCommand() === 'RECEIPT'
+        return $response->command === 'RECEIPT'
             && $response->getHeader('receipt-id') === 'ack-frame';
     }
 
@@ -372,9 +355,9 @@ class Stompie
         $frame->addHeader('content-length', strlen($message));
         $frame->addHeader('content-type', 'text/plain');
         $frame->addHeader('receipt', 'send-frame');
-        $frame->setBody($message);
+        $frame->body = $message;
         $response = $this->sendFrame($frame);
-        return $response->getCommand() == 'RECEIPT'
+        return $response->command == 'RECEIPT'
             && $response->getHeader('receip-id') === 'send-frame';
     }
 
@@ -394,7 +377,7 @@ class Stompie
         // If we got any messages when we subscribed to the queue, we've
         // got frames to read
         return $response !== false
-            && $response->getCommand() === 'MESSAGE';
+            && $response->command === 'MESSAGE';
     }
 
     /**
