@@ -216,12 +216,12 @@ class Stompie
     }
 
     /**
-     * Send a frame to the broker. Note that this method reconnects first.
+     * Send a frame to the broker. 
      *
      * @param StompieFrame $frame Frame to send
      * @return StompieFrame|false Response frame from server or false if no response
      */
-    protected function sendFrame(StompieFrame $frame)
+    private function sendFrame(StompieFrame $frame)
     {
         socket_write($this->socket, $frame->render());
         $this->read();
@@ -232,7 +232,7 @@ class Stompie
      *
      * @param StompieFrame $frame Frame
      */
-    protected function storeFrame(StompieFrame $frame)
+    private function storeFrame(StompieFrame $frame)
     {
         switch ($frame->command)
         {
@@ -251,7 +251,7 @@ class Stompie
     /**
      * Read messages from socket
      */
-    protected function read()
+    private function read()
     {
         $response = '';
         for (;;)
@@ -284,33 +284,11 @@ class Stompie
     }
 
     /**
-     * Disconnect from the broker
-     *
-     * @return void
-     */
-    protected function disconnect()
-    {
-        socket_close($this->socket);
-        $this->is_connected = false;
-    }
-
-    /**
-     *  Reconnect to the broker
-     *
-     *  @return bool Successful?
-     */
-    protected function reconnect()
-    {
-        $this->disconnect();
-        return $this->connect();
-    }
-
-    /**
      * Connect to the broker
      *
      * @return bool Was the connection successful?
      */
-    protected function connect()
+    private function connect()
     {
         $this->socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
         socket_connect($this->socket, $this->host, $this->port);
@@ -349,7 +327,7 @@ class Stompie
      */
     public function __destruct()
     {
-        $this->disconnect();
+        socket_close($this->socket);
     }
 
     /**
@@ -562,14 +540,25 @@ class Stompie
     /**
      * Reads the next frame from the queue.
      *
+     * @param string $class_name Class to intantiate, default is StompieFrame.
+     *
      * @return StompieFrame|false False if queue is empty, otherwise the next message
      */
-    public function readFrame()
+    public function readFrame($class_name = 'StompieFrame')
     {
         if ( ! $this->hasFrame())
         {
             return false;
         }
-        return array_pop($this->frames['messages']);
+        $frame = array_pop($this->frames['messages']);
+        if ($frame instanceof $class_name)
+        {
+            return $frame;
+        }
+        $return_frame = new $class_name;
+        $return_frame->body = $return_frame->body;
+        $return_frame->headers = $return_frame->headers;
+        $return_frame->command = $return_frame->command;
+        return $return_frame;
     }
 }
