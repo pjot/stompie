@@ -7,8 +7,8 @@ Native implementation of a PHP Stomp client that's meant to mimic (and in some w
 It might seem like a stupid idea to write this, but it's meant to eventually be a drop-in replacement for the extension for situations when you cannot install it (it is not officially supported by RHEL for example).
 
 ## Differences
-* Stompie only handles one subscribtion at a time for simplicity. This means that for example Stompie::ack assumes the frame belongs to the current subscription.
-* Stompie supports the NACK command.
+* Stomp only handles one subscribtion at a time for simplicity. This means that for example Stomp::ack assumes the frame belongs to the current subscription.
+* Stomp supports the NACK command.
 
 ## API coverage
 Not all of it is supported yet, but this is a work in progress!
@@ -16,27 +16,27 @@ Not all of it is supported yet, but this is a work in progress!
 ### Stomp
 Method                | Implemented by
 ----------------------|----------------
-Stomp::abort          | Stompie::abort
-Stomp::ack            | Stompie::ack
-Stomp::begin          | Stompie::begin
-Stomp::commit         | Stompie::commit
-Stomp::__construct    | Stompie::__construct
-Stomp::__destruct     | Stompie::__destruct
+Stomp::abort          | Stomp::abort
+Stomp::ack            | Stomp::ack
+Stomp::begin          | Stomp::begin
+Stomp::commit         | Stomp::commit
+Stomp::__construct    | Stomp::__construct
+Stomp::__destruct     | Stomp::__destruct
 Stomp::error          | -
-Stomp::getReadTimeout | Stompie::getReadTimeout
-Stomp::getSessionId   | Stompie::getSessionId
-Stomp::hasFrame       | Stompie::hasFrame
-Stomp::readFrame      | Stompie::readFrame
-Stomp::send           | Stompie::send
-Stomp::setReadTimeout | Stompie::setReadTimeout
-Stomp::subscribe      | Stompie::subscribe 
-Stomp::unsubscribe    | Stompie::unsubscribe
--                     | Stompie::nack
+Stomp::getReadTimeout | Stomp::getReadTimeout
+Stomp::getSessionId   | Stomp::getSessionId
+Stomp::hasFrame       | Stomp::hasFrame
+Stomp::readFrame      | Stomp::readFrame
+Stomp::send           | Stomp::send
+Stomp::setReadTimeout | Stomp::setReadTimeout
+Stomp::subscribe      | Stomp::subscribe 
+Stomp::unsubscribe    | Stomp::unsubscribe
+-                     | Stomp::nack
 
 ### StompFrame
 Method                  | Implemented by
 ------------------------|----------------
-StompFrame::__construct | StompieFrame::__construct
+StompFrame::__construct | StompFrame::__construct
 
 Property | Implemented by
 ---------|----------------

@@ -5,9 +5,9 @@
  * itself from a message received from the server and serialize itself into
  * a message to be sent to the server.
  *
- * @author Peter Bergström <peter@redpill-linpro.com>
+ * @author Peter Bergström <peter@pjot.se>
  */
-class StompieFrame
+class StompFrame
 {
     /**
      * @var string Stomp command
@@ -68,9 +68,7 @@ class StompieFrame
     public function removeHeader($key)
     {
         if (isset($this->headers[$key]))
-        {
             unset($this->headers[$key]);
-        }
     }
 
     /**
@@ -81,10 +79,10 @@ class StompieFrame
     protected function renderHeaders()
     {
         $headers = array();
+
         foreach ($this->headers as $key => $value)
-        {
             $headers[] = sprintf('%s:%s', $key, str_replace(':', '\c', $value));
-        }
+
         return implode("\n", $headers);
     }
 
@@ -112,7 +110,7 @@ class StompieFrame
      * Creates a frame from a message received from a server
      *
      * @param string $message Raw message from server
-     * @return StompieFrame
+     * @return StompFrame
      */
     public static function fromMessage($message)
     {
@@ -124,9 +122,8 @@ class StompieFrame
         {
             // First empty line is divider between header and body
             if (empty($row))
-            {
                 break;
-            }
+
             // Parse header
             preg_match('/([^:]*):(.*)/', $row, $matches);
             $frame->addHeader($matches[1], str_replace('\c', ':', $matches[2]));
@@ -147,9 +144,9 @@ class StompieFrame
  *
  * It is tested against ActiveMQ.
  *
- * @author Peter Bergström <peter@redpill-linpro.com>
+ * @author Peter Bergström <peter@pjot.se>
  */
-class Stompie
+class Stomp
 {
     /**
      * @var string Host (Stomp specification vhost)
@@ -218,10 +215,10 @@ class Stompie
     /**
      * Send a frame to the broker. 
      *
-     * @param StompieFrame $frame Frame to send
-     * @return StompieFrame|false Response frame from server or false if no response
+     * @param StompFrame $frame Frame to send
+     * @return StompFrame|false Response frame from server or false if no response
      */
-    private function sendFrame(StompieFrame $frame)
+    private function sendFrame(StompFrame $frame)
     {
         socket_write($this->socket, $frame->render());
         $this->read();
@@ -230,9 +227,9 @@ class Stompie
     /**
      * Store received frame in local queue
      *
-     * @param StompieFrame $frame Frame
+     * @param StompFrame $frame Frame
      */
-    private function storeFrame(StompieFrame $frame)
+    private function storeFrame(StompFrame $frame)
     {
         switch ($frame->command)
         {
@@ -267,19 +264,16 @@ class Stompie
                 {
                     // Ignore one char messages
                     if (strlen($message) < 2)
-                    {
                         continue;
-                    }
-                    $this->storeFrame(StompieFrame::fromMessage($message));
+
+                    $this->storeFrame(StompFrame::fromMessage($message));
                 }
                 $response = '';
             }
             $response .= $row;
             // Halt when the socket returns an empty response
             if ($row == '')
-            {
                 break;
-            }
         }
     }
 
@@ -299,7 +293,7 @@ class Stompie
             return $this->is_connected = false;
         }
         // Create connect frame
-        $frame = new StompieFrame('CONNECT');
+        $frame = new StompFrame('CONNECT');
         $frame->addHeader('accept-version', '1.1');
         $frame->addHeader('host', $this->host);
         // Add login credentials
@@ -333,12 +327,12 @@ class Stompie
     /**
      * NACK's a frame
      *
-     * @param StompieFrame $frame Frame
+     * @param StompFrame $frame Frame
      * @return bool Successful?
      */
-    public function nack(StompieFrame $frame)
+    public function nack(StompFrame $frame)
     {
-        $ack_frame = new StompieFrame('NACK');
+        $ack_frame = new StompFrame('NACK');
         $ack_frame->addHeader('message-id', $frame->getHeader('message-id'));
         $ack_frame->addHeader('subscription', 0);
         $receipt_id = self::makeReceiptId('nack');
@@ -359,12 +353,12 @@ class Stompie
     /**
      * ACK's a frame
      *
-     * @param StompieFrame $frame Frame
+     * @param StompFrame $frame Frame
      * @return bool Successful?
      */
-    public function ack(StompieFrame $frame)
+    public function ack(StompFrame $frame)
     {
-        $ack_frame = new StompieFrame('ACK');
+        $ack_frame = new StompFrame('ACK');
         $ack_frame->addHeader('message-id', $frame->getHeader('message-id'));
         $ack_frame->addHeader('subscription', 0);
         $receipt_id = self::makeReceiptId('ack');
@@ -423,7 +417,7 @@ class Stompie
      */
     public function begin($transaction_id)
     {
-        $frame = new StompieFrame('BEGIN');
+        $frame = new StompFrame('BEGIN');
         $frame->addHeader('transaction', $transaction_id);
         $this->sendFrame($frame);
     }
@@ -435,7 +429,7 @@ class Stompie
      */
     public function commit($transaction_id)
     {
-        $frame = new StompieFrame('COMMIT');
+        $frame = new StompFrame('COMMIT');
         $frame->addHeader('transaction', $transaction_id);
         $this->sendFrame($frame);
     }
@@ -447,7 +441,7 @@ class Stompie
      */
     public function abort($transaction_id)
     {
-        $frame = new StompieFrame('ABORT');
+        $frame = new StompFrame('ABORT');
         $frame->addHeader('transaction', $transaction_id);
         $this->sendFrame($frame);
     }
@@ -460,7 +454,7 @@ class Stompie
     public function subscribe($destination)
     {
         $this->destination = $destination;
-        $frame = new StompieFrame('SUBSCRIBE');
+        $frame = new StompFrame('SUBSCRIBE');
         $frame->addHeader('id', 0);
         $frame->addHeader('destination', $this->destination);
         $frame->addHeader('ack', 'client-individual');
@@ -472,7 +466,7 @@ class Stompie
      */
     public function unsubscribe()
     {
-        $frame = new StompieFrame('UNSUBSCRIBE');
+        $frame = new StompFrame('UNSUBSCRIBE');
         $frame->addHeader('id', 0);
         $frame->addHeader('destination', $destination);
         $this->sendFrame($frame);
@@ -493,11 +487,11 @@ class Stompie
      */
     public function send($destination, $message, $headers = array())
     {
-        $frame = new StompieFrame('SEND');
+        $frame = new StompFrame('SEND');
+
         foreach ($headers as $key => $value)
-        {
             $frame->addHeader($key, $value);
-        }
+
         $frame->addHeader('destination', $destination);
         $frame->addHeader('content-length', strlen($message));
         $frame->addHeader('content-type', 'text/plain');
@@ -540,25 +534,24 @@ class Stompie
     /**
      * Reads the next frame from the queue.
      *
-     * @param string $class_name Class to intantiate, default is StompieFrame.
+     * @param string $class_name Class to intantiate, default is StompFrame.
      *
-     * @return StompieFrame|false False if queue is empty, otherwise the next message
+     * @return StompFrame|false False if queue is empty, otherwise the next message
      */
-    public function readFrame($class_name = 'StompieFrame')
+    public function readFrame($class_name = 'StompFrame')
     {
         if ( ! $this->hasFrame())
-        {
             return false;
-        }
+
         $frame = array_pop($this->frames['messages']);
+
         if ($frame instanceof $class_name)
-        {
             return $frame;
-        }
+
         $return_frame = new $class_name;
-        $return_frame->body = $return_frame->body;
-        $return_frame->headers = $return_frame->headers;
-        $return_frame->command = $return_frame->command;
+        $return_frame->body = $frame->body;
+        $return_frame->headers = $frame->headers;
+        $return_frame->command = $frame->command;
         return $return_frame;
     }
 }
